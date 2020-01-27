@@ -2,7 +2,7 @@
 
 An Elixir Library for interfacing with [Asterisk](https://www.asterisk.org/) the Open Source Communications Software using [ARI](https://wiki.asterisk.org/wiki/pages/viewpage.action?pageId=29395573) the Asterisk REST Interface.
 
-Documentation is available on [Hexdocs](https://citybase.hexdocs.pm/ex_ari)
+Documentation is available on [Hexdocs](https://hexdocs.pm/ex_ari)
 
 An example application to get you started is available [here](https://github.com/citybaseinc/ex_ari_example). The example app also provides a lot of documentation on configuring Asterisk and setting up a local VOIP client.
 

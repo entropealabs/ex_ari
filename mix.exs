@@ -72,7 +72,6 @@ defmodule ExAri.MixProject do
 
   defp package do
     [
-      organization: "citybase",
       files: ~w(lib mix.exs README*),
       licenses: ["Apache-2.0"],
       links: %{"Github" => "https://github.com/citybaseinc/ex_ari"}
