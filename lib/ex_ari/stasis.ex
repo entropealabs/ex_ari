@@ -103,7 +103,7 @@ defmodule ARI.Stasis do
       :url,
       :status,
       :channel_supervisor,
-      :events_listener,
+      :listener,
       reconnection_attempts: 0,
       app: %{}
     ]
