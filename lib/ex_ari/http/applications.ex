@@ -42,7 +42,30 @@ defmodule ARI.HTTP.Applications do
     {:noreply, request("POST", "/#{name}/subscription", from, state)}
   end
 
+  def handle_call({:subscribe, name, subscriptions}, from, state) do
+    params =
+      case parse_subscription_event(subscriptions) do
+        nil -> nil
+        any -> %{eventSource: any}
+      end
+
+    {:noreply, request("POST", "/#{name}/subscription", from, state, params)}
+  end
+
   def handle_call({:unsubscribe, name}, from, state) do
     {:noreply, request("DELETE", "/#{name}/subscription", from, state)}
   end
+
+  defp parse_subscription_event(data) when is_map(data),
+    do: data |> Enum.reduce([], &(&2 ++ [parse_subscription_event(&1)])) |> Enum.join(",")
+
+  defp parse_subscription_event(channel: c_id) when is_bitstring(c_id), do: "channel:#{c_id}"
+  defp parse_subscription_event(bridge: b_id) when is_bitstring(b_id), do: "bridge:#{b_id}"
+
+  defp parse_subscription_event(endpoint: %{resource: r, tech: t})
+       when is_bitstring(r) and is_bitstring(t),
+       do: "endpoint:#{t}[/#{r}]"
+
+  defp parse_subscription_event(deviceState: d_n) when is_bitstring(d_n), do: "deviceState:#{d_n}"
+  defp parse_subscription_event(_), do: nil
 end

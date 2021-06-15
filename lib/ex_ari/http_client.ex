@@ -11,7 +11,7 @@ defmodule ARI.HTTPClient do
     Response returned from all REST calls
     """
     @type t :: %__MODULE__{}
-    defstruct [:status, :error, :data, headers: [], data: "", json: %{}, completed: false]
+    defstruct [:status, :error, headers: [], data: "", json: %{}, completed: false]
   end
 
   defmacro __using__(path) do

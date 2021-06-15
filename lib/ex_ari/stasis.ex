@@ -1,12 +1,12 @@
 defmodule ARI.Stasis do
   @moduledoc """
-  The `ARI.Stasis` module is used to register a [Stasis](https://wiki.asterisk.org/wiki/pages/viewpage.action?pageId=29395573#AsteriskRESTInterface(ARI)-WhatisStasis?) application with the Asterisk server. It connects to the Asterisk server using a websocket. 
+  The `ARI.Stasis` module is used to register a [Stasis](https://wiki.asterisk.org/wiki/pages/viewpage.action?pageId=29395573#AsteriskRESTInterface(ARI)-WhatisStasis?) application with the Asterisk server. It connects to the Asterisk server using a websocket.
 
   The host, username and password are configured in the Asterisk configuration file [ari.conf](https://wiki.asterisk.org/wiki/display/AST/Asterisk+Configuration+for+ARI). The name that is registered is provided in the `t:ARI.Stasis.app_config/0` as `name`.
 
   Once registered it receives all events for all [channels](https://wiki.asterisk.org/wiki/display/AST/Channels) associated with a Stasis application. Here's an example application, you can see the Stasis app configured for the built-in `ARI.Router` application as well as a custom application, in the list of children.
 
-  ### Example 
+  ### Example
       defmodule ExARIExample.Application do
           use Application
           alias ARI.{ChannelRegistrar, Configurator, HTTP, Stasis}
@@ -24,8 +24,8 @@ defmodule ARI.Stasis do
             config_module = ExARIExample.Config
             client_config = %{name: "ex_ari", module: ExARIExample.Client}
             router_config = %{
-              name: "router", 
-              module: ARI.Router, 
+              name: "router",
+              module: ARI.Router,
               extensions: %{
                 "ex_ari" => "ex_ari",
                 "+15555550101" => "ex_ari"
@@ -52,7 +52,7 @@ defmodule ARI.Stasis do
 
   For the full example check out the [ex_ari_example application](https://github.com/citybaseinc/ex_ari_example), which will get you up and running with making calls on your local machine.
 
-  There are two very important events that `ARI.Stasis` receives that drive an `ex_ari` application `StasisStart` and `StasisEnd`. 
+  There are two very important events that `ARI.Stasis` receives that drive an `ex_ari` application `StasisStart` and `StasisEnd`.
 
   ## StasisStart
 
@@ -71,7 +71,7 @@ defmodule ARI.Stasis do
   The `ARI.Stasis` process does its best to extract out the channel id from several different types of events in order to route the event to the correct process. All events are sent using `send/2` in the form of `{:ari, event}` where event is the JSON event deserialized with atom keys. Events that are not routable are handled with a `Logger.warn/1` message.
   """
   use WebSockex
-  alias ARI.ChannelRegistrar
+  alias ARI.{ChannelRegistrar, Additions}
   require Logger
 
   @type app_config :: %{
@@ -103,6 +103,7 @@ defmodule ARI.Stasis do
       :url,
       :status,
       :channel_supervisor,
+      :events_listener,
       reconnection_attempts: 0,
       app: %{}
     ]
@@ -119,11 +120,18 @@ defmodule ARI.Stasis do
   @spec start_link(module(), app_config(), String.t(), String.t(), String.t()) ::
           {:ok, pid} | {:error, term}
   def start_link(channel_supervisor, app_config, host, un, pw) do
-    url = "#{host}?api_key=#{un}:#{pw}&app=#{app_config.name}"
+    subscriptions =
+      case app_config[:subscriptions] do
+        :all -> "&subscribeAll=true"
+        true -> "&subscribeAll=true"
+        _ -> ""
+      end
+
+    url = "#{host}?api_key=#{un}:#{pw}&app=#{app_config.name}" <> subscriptions
     uri = URI.parse(url)
     conn = WebSockex.Conn.new(uri)
 
-    debug("Connecting: #{inspect(uri)}")
+    debug("Connecting: #{inspect(uri, pretty: true)}")
 
     WebSockex.start_link(
       conn,
@@ -143,8 +151,14 @@ defmodule ARI.Stasis do
         reconnection_attempts: 0
     }
 
-    debug("Connected: #{inspect(state)}")
-    {:ok, state}
+    debug("Connected: #{inspect(state, pretty: true)}")
+
+    state
+    |> Additions.check_for_event_listener()
+    |> case do
+      {:ok, state} -> {:ok, state}
+      _ -> {:ok, state}
+    end
   end
 
   @impl WebSockex
@@ -156,7 +170,7 @@ defmodule ARI.Stasis do
         reconnection_attempts: state.reconnection_attempts + 1
     }
 
-    debug("Disconnected: #{inspect(state)}")
+    debug("Disconnected: #{inspect(state, pretty: true)}")
 
     case state.reconnection_attempts do
       ra when ra < 10 ->
@@ -176,8 +190,17 @@ defmodule ARI.Stasis do
 
   @impl WebSockex
   def handle_info({:DOWN, _ref, :process, object, reason}, state) do
-    Logger.info("Channel process #{inspect(object)} is down because #{inspect(reason)}")
+    Logger.error(
+      "Channel process #{inspect(object, pretty: true)} is down because #{
+        inspect(reason, pretty: true)
+      }"
+    )
+
     {:ok, state}
+  end
+
+  def handle_info({:listener, pid}, state) when is_pid(pid) do
+    {:ok, %{state | listener: pid}}
   end
 
   @impl WebSockex
@@ -195,7 +218,7 @@ defmodule ARI.Stasis do
            event,
          state
        ) do
-    debug("Got StasisStart event: #{inspect(event)}")
+    debug("Got StasisStart event: #{inspect(event, pretty: true)}")
     call_state = get_state(state, id, number, args, event, state.app)
 
     {:ok, pid} =
@@ -221,7 +244,8 @@ defmodule ARI.Stasis do
   end
 
   defp handle_payload(%{playback: %{target_uri: <<"channel:", id::binary>>}} = payload, state) do
-    debug("Received Playback Event #{inspect(payload)}")
+    debug("Received Playback Event #{inspect(payload, pretty: true)}")
+    send(state.app.listener, {:event, payload})
 
     id
     |> ChannelRegistrar.get_channel()
@@ -231,7 +255,8 @@ defmodule ARI.Stasis do
   end
 
   defp handle_payload(%{recording: %{target_uri: <<"channel:", id::binary>>}} = payload, state) do
-    debug("Received Recording Event #{inspect(payload)}")
+    debug("Received Recording Event #{inspect(payload, pretty: true)}")
+    send(state.app.listener, {:event, payload})
 
     id
     |> ChannelRegistrar.get_channel()
@@ -241,7 +266,8 @@ defmodule ARI.Stasis do
   end
 
   defp handle_payload(%{channel: %{id: id}} = payload, state) do
-    debug("Received Event: #{inspect(payload)}")
+    debug("Received Event: #{inspect(payload, pretty: true)}")
+    send(state.app.listener, {:event, payload})
 
     id
     |> ChannelRegistrar.get_channel()
@@ -250,8 +276,25 @@ defmodule ARI.Stasis do
     {:ok, state}
   end
 
+  defp handle_payload(payload, %{app: %{listener: listener}} = state) when is_pid(listener) do
+    debug("Pushing Unhandled payload to Listener: : #{inspect(payload, pretty: true)}")
+    send(listener, {:event, payload})
+    {:ok, state}
+  rescue
+    err ->
+      err |> inspect() |> Logger.error()
+      {:ok, state}
+  end
+
   defp handle_payload(payload, state) do
-    Logger.warn("Unhandled Payload: #{inspect(payload)}")
+    debug(
+      "Pushing Unhandled payload to Listener: : #{inspect(payload, pretty: true)} State: #{
+        inspect(state, pretty: true)
+      }"
+    )
+
+    send(state.app.listener, {:event, payload})
+
     {:ok, state}
   end
 
