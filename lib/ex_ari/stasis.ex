@@ -97,7 +97,7 @@ defmodule ARI.Stasis do
     @moduledoc false
     @type t :: %__MODULE__{}
 
-    @derive {Jason.Encoder, only: [:connected, :url, :status, :type]}
+    @derive {Jason.Encoder, only: [:connected, :url, :status]}
     defstruct [
       :connected,
       :url,
